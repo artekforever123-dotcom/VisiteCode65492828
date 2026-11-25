@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VisitCode</title>
+<style>
+:root{--bg:#e9edf2;--ink:#1b2559;--mute:#55608a;--seal:#b22a2f;--card:#fff;--line:#c9d0e0}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;background:var(--bg);color:var(--ink);font:17px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:30rem;margin:0 auto;padding:2.5rem 1.25rem 3rem;text-align:center}
+h1{font:600 1.9rem/1.2 "Iowan Old Style",Georgia,serif;margin:1rem 0 .5rem}
+p{margin:.35rem 0}.mute{color:var(--mute)}.big{font-size:1.25rem;font-weight:600}
+.seal{width:7rem;height:7rem;margin:0 auto;background:var(--seal);color:#fff;border-radius:.6rem;display:grid;place-items:center;font:700 4rem/1 "Hiragino Mincho ProN","Yu Mincho","Noto Serif CJK JP",serif;animation:stamp .45s cubic-bezier(.2,.8,.3,1) both}
+.seal.quiet{background:var(--mute);animation:none}
+@keyframes stamp{from{transform:scale(1.7) rotate(-9deg);opacity:0}to{transform:scale(1) rotate(-3deg);opacity:1}}
+@media(prefers-reduced-motion:reduce){.seal{animation:none}}
+form,.opts{text-align:left;margin-top:1.5rem}
+label.f{display:block;font-weight:600;margin-bottom:.4rem}
+input[type=text]{width:100%;padding:.8rem .9rem;font:inherit;border:1.5px solid var(--line);border-radius:.5rem;background:var(--card);color:var(--ink)}
+.g{display:flex;gap:.7rem;align-items:center;padding:.7rem .9rem;margin:.4rem 0;background:var(--card);border:1.5px solid var(--line);border-radius:.5rem}
+.g input{width:1.2rem;height:1.2rem;accent-color:var(--ink)}
+button{width:100%;margin-top:.9rem;padding:.95rem;font:600 1rem inherit;font-family:inherit;color:#fff;background:var(--ink);border:0;border-radius:.5rem;cursor:pointer}
+button.alt{background:var(--card);color:var(--ink);border:1.5px solid var(--ink)}
+:focus-visible{outline:3px solid var(--seal);outline-offset:2px}
+.err{color:var(--seal);min-height:1.4em;margin-top:.6rem}
+.spin{width:2.2rem;height:2.2rem;margin:3rem auto 1rem;border:3px solid var(--line);border-top-color:var(--ink);border-radius:50%;animation:r 1s linear infinite}
+@keyframes r{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<main id="app" aria-live="polite"></main>
+<script>
+// 1. Вставьте сюда ссылку на веб-приложение Apps Script (заканчивается на /exec)
+const API = 'ВСТАВЬТЕ_ССЫЛКУ_APPS_SCRIPT';
+
+const GROUPS = {
+  k4_6: 'Дети 4–6 лет', k6_9: 'Дети 6–9 лет', k9_13: 'Дети 9–13 лет',
+  k6_11: 'Дети 6–11 лет', aikijujutsu: 'Айкидзюдзюцу', aikido: 'Айкидо'
+};
+const app = document.getElementById('app');
+const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+let deviceId = null;
+try { deviceId = localStorage.getItem('vc_id'); } catch (e) {}
+if (!deviceId) {
+  deviceId = (crypto.randomUUID ? crypto.randomUUID() : Date.now() + '-' + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2));
+  try { localStorage.setItem('vc_id', deviceId); } catch (e) {}
+}
+
+async function call(data) {
+  const res = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(Object.assign({ deviceId }, data)) });
+  return res.json();
+}
+
+function loading() { app.innerHTML = '<div class="spin" role="status"></div><p class="mute">Отмечаем…</p>'; }
+
+async function run(data) {
+  loading();
+  try { render(await call(data)); }
+  catch (e) { render({ status: 'error', message: 'Нет связи с сервером. Проверьте интернет и попробуйте ещё раз.' }); }
+}
+
+function render(r) {
+  if (r.status === 'ok' || r.status === 'already') {
+    const done = r.status === 'ok';
+    app.innerHTML = `<div class="seal${done ? '' : ' quiet'}" aria-hidden="true">道</div>
+      <h1>${done ? 'Вы отмечены' : 'Вы уже отмечены'}</h1>
+      <p class="big">${esc(r.name)}</p><p>${esc(r.session)}</p>
+      <p class="mute">${done ? 'Время отметки' : 'Отметка была в'} ${esc(r.time)} по Москве</p>`;
+  } else if (r.status === 'choose') {
+    app.innerHTML = `<h1>Какая тренировка?</h1><p class="mute">${esc(r.name)}, сейчас идут сразу две ваши группы.</p><div class="opts"></div>`;
+    r.options.forEach(o => {
+      const b = document.createElement('button');
+      b.textContent = o.label;
+      b.onclick = () => run({ action: 'checkin', sessionId: o.id });
+      app.querySelector('.opts').appendChild(b);
+    });
+  } else if (r.status === 'no_session') {
+    app.innerHTML = `<div class="seal quiet" aria-hidden="true">道</div><h1>Сейчас нет вашей тренировки</h1>
+      <p>${esc(r.name)}, отметка открывается за 30 минут до начала.</p>
+      ${r.next ? `<p class="mute">Ближайшая: ${esc(r.next)}</p>` : ''}`;
+  } else if (r.status === 'unknown') {
+    registration();
+  } else {
+    app.innerHTML = `<h1>Не получилось</h1><p>${esc(r.message || 'Неизвестная ошибка')}</p><button id="retry">Повторить</button>`;
+    document.getElementById('retry').onclick = start;
+  }
+}
+
+function registration() {
+  app.innerHTML = `<h1>Привет! Давайте познакомимся</h1>
+    <p class="mute">Это нужно один раз. Телефон запомнит вас, дальше достаточно приложить его к метке.</p>
+    <form id="reg" novalidate>
+      <label class="f" for="nm">Имя и фамилия</label>
+      <input type="text" id="nm" autocomplete="name" maxlength="60">
+      <label class="f" style="margin-top:1.2rem">В каких группах занимаетесь</label>
+      ${Object.keys(GROUPS).map(k => `<label class="g"><input type="checkbox" value="${k}">${esc(GROUPS[k])}</label>`).join('')}
+      <div class="err" id="err" role="alert"></div>
+      <button type="submit">Сохранить и отметиться</button>
+    </form>`;
+  document.getElementById('reg').onsubmit = ev => {
+    ev.preventDefault();
+    const name = document.getElementById('nm').value.trim();
+    const groups = [...document.querySelectorAll('#reg input[type=checkbox]:checked')].map(c => c.value);
+    if (name.length < 2) return document.getElementById('err').textContent = 'Введите имя и фамилию.';
+    if (!groups.length) return document.getElementById('err').textContent = 'Выберите хотя бы одну группу.';
+    run({ action: 'register', name, groups });
+  };
+}
+
+function start() { run({ action: 'checkin' }); }
+if (API.indexOf('http') !== 0) {
+  app.innerHTML = '<h1>Не настроено</h1><p>В файле index.html не указана ссылка на Apps Script.</p>';
+} else start();
+</script>
+</body>
+  </html> 
